@@ -28,9 +28,21 @@ export type PaymentInput = {
 };
 
 /** 「松本 守生 先生」→「松本守生」。空白・敬称・前後の記号を取り除く。 */
+/** 同じ人でも書き方が分かれやすい異体字（髙→高 など）。名前の照合だけに使う。 */
+const VARIANTS: Record<string, string> = {
+  "髙": "高", // 髙 → 高
+  "﨑": "崎", // 﨑 → 崎
+  "塚": "塚", // 塚（互換） → 塚
+  "德": "徳", // 德 → 徳
+  "\u{20BB7}": "吉", // 𠮷 → 吉
+  "黑": "黒", // 黑 → 黒
+};
+const VARIANT_RE = new RegExp(`[${Object.keys(VARIANTS).join("")}]`, "gu");
+
 export function normalizeDoctorName(name: string): string {
   return name
     .normalize("NFKC")
+    .replace(VARIANT_RE, (c) => VARIANTS[c] ?? c)
     .replace(/[（(].*$/, "")
     .replace(/\s+/g, "")
     .replace(/^[│|・,、]+|[│|・,、]+$/g, "")

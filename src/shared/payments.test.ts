@@ -16,6 +16,11 @@ describe("医師名の正規化", () => {
     expect(normalizeDoctorName("平松靖史先生│")).toBe("平松靖史");
   });
 
+  it("異体字（髙・﨑など）は同じ人として扱う", () => {
+    expect(normalizeDoctorName("髙松 泰 先生")).toBe(normalizeDoctorName("高松泰"));
+    expect(normalizeDoctorName("宮﨑香奈")).toBe("宮崎香奈");
+  });
+
   it("日本人の名前らしいものだけを残す", () => {
     expect(looksLikeJapaneseName("松本守生")).toBe(true);
     expect(looksLikeJapaneseName("山梨大学医学部附属病院血液・腫瘍内科教授")).toBe(false);
