@@ -39,7 +39,7 @@ export function FeeRatesBar() {
   const { rates, setRates } = useContext(Ctx);
   const isDefault = rates.speaker === DEFAULT_RATES.speaker && rates.moderator === DEFAULT_RATES.moderator;
   const field = (k: keyof FeeRates, label: string) => (
-    <label className="flex items-center gap-1">
+    <label className="flex items-center gap-1 whitespace-nowrap">
       {label}
       <Input
         inputMode="numeric"
