@@ -1,5 +1,5 @@
 // 医師と製薬会社の関係（講演会での演者・座長、登録した支払い）をまとめる。外部依存なし。
-import { collectAppearances, type Payment } from "./payments";
+import { collectAppearances, type Payment } from "./payments.js";
 
 /** 講演会カレンダーのカテゴリ名 → 会社名（製品名のカテゴリは販売会社にまとめる）。 */
 const CATEGORY_COMPANY: Record<string, string> = {
