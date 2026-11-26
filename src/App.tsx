@@ -2,6 +2,7 @@ import { useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, LogOut, Trash2, Upload } from "lucide-react";
 import { Button, Card, Input, Modal } from "./ui";
+import { RelationMap, RelationMatrix, useRelations } from "./relations-view";
 import { CSV_COLUMNS, PAYMENT_CATEGORIES, type CalendarAppearance, type DoctorSummary, type Payment } from "./shared/payments";
 
 type DoctorDetail = { key: string; name: string; payments: Payment[]; appearances: CalendarAppearance[] };
@@ -23,7 +24,35 @@ export default function App() {
   });
   if (session.isLoading) return <Shell><p className="text-sm text-slate-500">読み込み中…</p></Shell>;
   if (!session.data?.authed) return <Shell><Login configured={session.data?.configured ?? false} /></Shell>;
-  return <Shell authed><Doctors /></Shell>;
+  return <Shell authed><Main /></Shell>;
+}
+
+const TABS = [
+  ["list", "医師一覧"],
+  ["map", "関係性マップ"],
+  ["matrix", "医師×会社の表"],
+] as const;
+
+function Main() {
+  const [tab, setTab] = useState<(typeof TABS)[number][0]>("list");
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-1 rounded-lg bg-slate-200/70 p-1" role="tablist">
+        {TABS.map(([value, label]) => (
+          <Button key={value} role="tab" aria-selected={tab === value} variant="ghost" size="sm"
+            className={tab === value ? "flex-1 bg-white text-slate-900 shadow-sm hover:bg-white" : "flex-1"}
+            onClick={() => setTab(value)}>
+            {label}
+          </Button>
+        ))}
+      </div>
+      {tab === "list" && <Doctors onOpen={setOpenKey} />}
+      {tab === "map" && <RelationMap onOpenDoctor={setOpenKey} />}
+      {tab === "matrix" && <RelationMatrix onOpenDoctor={setOpenKey} />}
+      <DoctorDialog doctorKey={openKey} onClose={() => setOpenKey(null)} />
+    </div>
+  );
 }
 
 function Shell({ children, authed }: { children: ReactNode; authed?: boolean }) {
@@ -75,10 +104,9 @@ function Login({ configured }: { configured: boolean }) {
   );
 }
 
-function Doctors() {
+function Doctors({ onOpen }: { onOpen: (key: string) => void }) {
   const [query, setQuery] = useState("");
   const [onlyPaid, setOnlyPaid] = useState(false);
-  const [openKey, setOpenKey] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const { data = [], isLoading } = useQuery({ queryKey: ["doctors"], queryFn: () => api<DoctorSummary[]>("/api/doctors") });
 
@@ -117,7 +145,7 @@ function Doctors() {
           <tbody>
             {isLoading && <tr><td className="px-4 py-6 text-slate-500" colSpan={4 + years.length}>読み込み中…</td></tr>}
             {rows.map((d) => (
-              <tr key={d.key} className="cursor-pointer border-t border-slate-100 hover:bg-sky-50" onClick={() => setOpenKey(d.key)}>
+              <tr key={d.key} className="cursor-pointer border-t border-slate-100 hover:bg-sky-50" onClick={() => onOpen(d.key)}>
                 <td className="whitespace-nowrap px-4 py-2 font-medium">{d.name}</td>
                 <td className="max-w-xs truncate px-4 py-2 text-slate-600" title={d.affiliation}>{d.affiliation}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{d.lectureCount || "—"}</td>
@@ -130,7 +158,6 @@ function Doctors() {
       </Card>
       <p className="text-xs text-slate-500">金額は登録したデータの合計です。各社の公開データをすべて登録していない場合、実際の金額より少なくなります。</p>
 
-      <DoctorDialog doctorKey={openKey} onClose={() => setOpenKey(null)} />
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
@@ -149,11 +176,31 @@ function DoctorDialog({ doctorKey, onClose }: { doctorKey: string | null; onClos
   };
   const remove = useMutation({ mutationFn: (id: number) => api(`/api/payments/${id}`, { method: "DELETE" }), onSuccess: refresh });
   const total = data?.payments.reduce((s, p) => s + p.amount, 0) ?? 0;
+  const relations = useRelations(Boolean(doctorKey));
+  const byCompany = (relations.data?.edges ?? []).filter((e) => e.doctor === doctorKey).sort((a, b) => b.lectures - a.lectures || b.amount - a.amount);
 
   return (
     <Modal open={Boolean(doctorKey)} onClose={onClose} title={data?.name ?? doctorKey} wide>
       {data && (
         <div className="space-y-6">
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold text-slate-700">製薬会社との関係（{byCompany.length}社）</h3>
+            {byCompany.length === 0 ? (
+              <p className="text-sm text-slate-500">{relations.isLoading ? "読み込み中…" : "会社の講演会への登場や支払いの登録はありません。"}</p>
+            ) : (
+              <ul className="space-y-1 text-sm">
+                {byCompany.map((e) => (
+                  <li key={e.company} className="flex flex-wrap justify-between gap-x-3">
+                    <span className="font-medium">{e.company}</span>
+                    <span className="tabular-nums text-slate-600">
+                      講演会 {e.lectures}回（演者 {e.asSpeaker}・座長 {e.asModerator}）{e.lastDate && `・最新 ${e.lastDate}`}{e.amount ? `・支払い ${yen(e.amount)}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <section className="space-y-2">
             <h3 className="text-sm font-semibold text-slate-700">支払い（登録合計 {yen(total)}）</h3>
             {data.payments.length === 0 ? (
