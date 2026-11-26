@@ -111,3 +111,9 @@ export function parseInput(body: any): PaymentInput | null {
     note: body.note ?? null,
   };
 }
+
+/** ?year=2025 を年度として読む（なければ null＝すべて）。 */
+export function yearParam(req: VercelRequest): number | null {
+  const y = Number(req.query.year);
+  return Number.isInteger(y) && y >= 2000 && y <= 2100 ? y : null;
+}

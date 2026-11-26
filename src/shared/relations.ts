@@ -66,6 +66,27 @@ export type Relations = {
 type EventLike = { id: number; date: string; title: string; category: string } & Record<string, unknown>;
 
 /** 講演会と支払いから、医師×会社の関係をまとめる。 */
+/** 日付（YYYY-MM-DD）の年度（4月始まり）。 */
+export function fiscalYearOf(date: string): number {
+  const [y, m] = date.split("-").map(Number);
+  return m >= 4 ? y : y - 1;
+}
+
+/** 講演会と支払いにある年度の一覧（新しい順）。 */
+export function availableYears(events: readonly { date: string }[], payments: readonly Pick<Payment, "fiscalYear">[]): number[] {
+  const years = new Set<number>([...events.map((e) => fiscalYearOf(e.date)), ...payments.map((p) => p.fiscalYear)]);
+  return [...years].filter(Number.isFinite).sort((a, b) => b - a);
+}
+
+/** 年度で絞る（year が null ならすべて）。 */
+export function filterByYear<E extends { date: string }>(events: readonly E[], payments: readonly Payment[], year: number | null) {
+  if (year == null) return { events: [...events], payments: [...payments] };
+  return {
+    events: events.filter((e) => fiscalYearOf(e.date) === year),
+    payments: payments.filter((p) => p.fiscalYear === year),
+  };
+}
+
 export function buildRelations(events: readonly EventLike[], payments: readonly Payment[]): Relations {
   const byId = new Map(events.map((e) => [e.id, e]));
   const appearances = collectAppearances(events);

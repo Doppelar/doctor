@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type SimulationNodeDatum } from "d3-force";
 import { doctorUnitPrices, estimateFeeFor, type Relations, type RelationEdge } from "./shared/relations";
-import { man, useFeeRates, yen as yenFull } from "./fees";
+import { man, useFeeRates, useYear, yen as yenFull } from "./fees";
 import { Button, Card } from "./ui";
 
 
@@ -15,12 +15,13 @@ export function useEdgeFee(data: Relations | undefined) {
 }
 
 export function useRelations(enabled = true) {
+  const { year } = useYear();
   return useQuery({
-    queryKey: ["relations"],
+    queryKey: ["relations", year],
     queryFn: async () => {
-      const res = await fetch("/api/relations", { credentials: "same-origin" });
+      const res = await fetch(year == null ? "/api/relations" : `/api/relations?year=${year}`, { credentials: "same-origin" });
       if (!res.ok) throw new Error("関係のデータを読み込めませんでした");
-      return (await res.json()) as Relations;
+      return (await res.json()) as Relations & { years: number[]; year: number | null };
     },
     enabled,
   });
@@ -406,5 +407,25 @@ export function CompanyShareChart({ onOpenDoctor }: { onOpenDoctor: (key: string
         各医師の金額（目安：登場回数×単価。支払いを登録した組み合わせは登録額との大きい方）を100%として、会社ごとの割合を示します。上位40人まで。表の数値は「医師×会社の表」タブにあります。
       </p>
     </div>
+  );
+}
+
+/** 年度の切り替え（4月〜翌3月）。 */
+export function YearSelect() {
+  const { year, setYear } = useYear();
+  const { data } = useRelations();
+  const years = data?.years ?? (year != null ? [year] : []);
+  return (
+    <label className="flex items-center gap-2 text-sm font-medium">
+      年度
+      <select
+        value={year ?? ""}
+        onChange={(e) => setYear(e.target.value ? Number(e.target.value) : null)}
+        className="h-9 rounded-md border border-slate-300 bg-white px-2"
+      >
+        <option value="">すべての年度</option>
+        {years.map((y) => <option key={y} value={y}>{y}年度（{y}年4月〜{y + 1}年3月）</option>)}
+      </select>
+    </label>
   );
 }

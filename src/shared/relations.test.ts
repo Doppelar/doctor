@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRelations, companyOf, doctorUnitPrices, estimateFee, estimateFeeFor, sumFees, unitPrice } from "./relations";
+import { availableYears, buildRelations, companyOf, filterByYear, fiscalYearOf, doctorUnitPrices, estimateFee, estimateFeeFor, sumFees, unitPrice } from "./relations";
 import type { Payment } from "./payments";
 
 describe("カテゴリから会社を決める", () => {
@@ -86,5 +86,23 @@ describe("医師ごとの単価", () => {
   it("実績の単価があれば演者はその単価、座長は既定の比率で計算する", () => {
     expect(estimateFeeFor({ asSpeaker: 2, asModerator: 1 }, rates, 150000)).toBe(300000 + 75000);
     expect(estimateFeeFor({ asSpeaker: 2, asModerator: 1 }, rates, null)).toBe(250000);
+  });
+});
+
+describe("年度", () => {
+  it("4月始まりの年度にする", () => {
+    expect(fiscalYearOf("2025-04-01")).toBe(2025);
+    expect(fiscalYearOf("2026-03-31")).toBe(2025);
+    expect(fiscalYearOf("2026-11-25")).toBe(2026);
+  });
+
+  it("講演会は日付の年度、支払いは登録した年度で絞る", () => {
+    const events = [{ date: "2025-05-01" }, { date: "2026-02-01" }, { date: "2026-05-01" }];
+    const pays = [{ fiscalYear: 2025 }, { fiscalYear: 2024 }] as Payment[];
+    const r = filterByYear(events, pays, 2025);
+    expect(r.events).toHaveLength(2);
+    expect(r.payments).toHaveLength(1);
+    expect(filterByYear(events, pays, null).events).toHaveLength(3);
+    expect(availableYears(events, pays)).toEqual([2026, 2025, 2024]);
   });
 });

@@ -66,3 +66,13 @@ export function FeeRatesBar() {
     </div>
   );
 }
+
+/** 表示する年度（null＝すべて）。 */
+const YearCtx = createContext<{ year: number | null; setYear: (y: number | null) => void }>({ year: null, setYear: () => {} });
+
+export function YearProvider({ children }: { children: ReactNode }) {
+  const [year, setYear] = useState<number | null>(null);
+  return <YearCtx.Provider value={{ year, setYear }}>{children}</YearCtx.Provider>;
+}
+
+export const useYear = () => useContext(YearCtx);

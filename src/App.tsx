@@ -2,8 +2,8 @@ import { useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, LogOut, Trash2, Upload } from "lucide-react";
 import { Button, Card, Input, Modal } from "./ui";
-import { CompanyShareChart, RelationMap, RelationMatrix, useRelations } from "./relations-view";
-import { FeeRatesBar, FeeRatesProvider, useFeeRates } from "./fees";
+import { CompanyShareChart, RelationMap, RelationMatrix, YearSelect, useRelations } from "./relations-view";
+import { FeeRatesBar, FeeRatesProvider, YearProvider, useFeeRates, useYear } from "./fees";
 import { doctorUnitPrices, estimateFeeFor, sumFees, unitPrice } from "./shared/relations";
 import { CSV_COLUMNS, PAYMENT_CATEGORIES, type CalendarAppearance, type DoctorSummary, type Payment } from "./shared/payments";
 
@@ -26,7 +26,7 @@ export default function App() {
   });
   if (session.isLoading) return <Shell><p className="text-sm text-slate-500">読み込み中…</p></Shell>;
   if (!session.data?.authed) return <Shell><Login configured={session.data?.configured ?? false} /></Shell>;
-  return <Shell authed><FeeRatesProvider><Main /></FeeRatesProvider></Shell>;
+  return <Shell authed><FeeRatesProvider><YearProvider><Main /></YearProvider></FeeRatesProvider></Shell>;
 }
 
 const TABS = [
@@ -41,6 +41,10 @@ function Main() {
   const [openKey, setOpenKey] = useState<string | null>(null);
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <YearSelect />
+        <span className="text-xs text-slate-500">講演会は開催日の年度、支払いは登録した年度で絞ります。</span>
+      </div>
       <FeeRatesBar />
       <div className="flex gap-1 rounded-lg bg-slate-200/70 p-1" role="tablist">
         {TABS.map(([value, label]) => (
@@ -113,7 +117,11 @@ function Doctors({ onOpen }: { onOpen: (key: string) => void }) {
   const [query, setQuery] = useState("");
   const [onlyPaid, setOnlyPaid] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const { data = [], isLoading } = useQuery({ queryKey: ["doctors"], queryFn: () => api<DoctorSummary[]>("/api/doctors") });
+  const { year } = useYear();
+  const { data = [], isLoading } = useQuery({
+    queryKey: ["doctors", year],
+    queryFn: () => api<DoctorSummary[]>(year == null ? "/api/doctors" : `/api/doctors?year=${year}`),
+  });
   const rates = useFeeRates();
   const relations = useRelations();
   const units = useMemo(() => doctorUnitPrices(relations.data?.edges ?? []), [relations.data]);
@@ -186,7 +194,7 @@ function DoctorDialog({ doctorKey, onClose }: { doctorKey: string | null; onClos
   });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["doctor", doctorKey] });
-    qc.invalidateQueries({ queryKey: ["doctors"] });
+    qc.invalidateQueries({ queryKey: ["doctors"] }); qc.invalidateQueries({ queryKey: ["relations"] });
   };
   const remove = useMutation({ mutationFn: (id: number) => api(`/api/payments/${id}`, { method: "DELETE" }), onSuccess: refresh });
   const total = data?.payments.reduce((s, p) => s + p.amount, 0) ?? 0;
@@ -312,7 +320,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
   const [result, setResult] = useState<string | null>(null);
   const imp = useMutation({
     mutationFn: () => api<{ imported: number }>("/api/payments/import", { method: "POST", body: JSON.stringify({ csv }) }),
-    onSuccess: (r) => { setResult(`${r.imported}件を登録しました`); setCsv(""); qc.invalidateQueries({ queryKey: ["doctors"] }); },
+    onSuccess: (r) => { setResult(`${r.imported}件を登録しました`); setCsv(""); qc.invalidateQueries({ queryKey: ["doctors"] }); qc.invalidateQueries({ queryKey: ["relations"] }); },
     onError: (e: any) => setResult([e.message, ...(e.body?.errors ?? [])].join("\n")),
   });
   const close = () => { onClose(); setResult(null); };
