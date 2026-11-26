@@ -15,6 +15,7 @@ export function CompanyCompare({ onOpenDoctor }: { onOpenDoctor: (key: string) =
   const [chosen, setChosen] = useState<string[]>(DEFAULT_COMPARE);
   const [metric, setMetric] = useState<"amount" | "count">("amount");
   const [minTotal, setMinTotal] = useState(2);
+  const [allOnly, setAllOnly] = useState(false);
 
   const companies = (data?.companies ?? []).map((c) => c.name);
   const active = chosen.filter((c) => companies.includes(c));
@@ -25,8 +26,10 @@ export function CompanyCompare({ onOpenDoctor }: { onOpenDoctor: (key: string) =
     const valueOf = (e: RelationEdge) => (metric === "count" ? e.lectures : Math.max(fee(e), e.amount));
     const lectures = new Map<string, number>();
     for (const e of data.edges) if (active.includes(e.company)) lectures.set(e.doctor, (lectures.get(e.doctor) ?? 0) + e.lectures);
-    return compareCompanies(data.edges, active, valueOf).filter((r) => (lectures.get(r.doctor) ?? 0) >= minTotal);
-  }, [data, active.join("|"), metric, fee, minTotal]);
+    return compareCompanies(data.edges, active, valueOf).filter(
+      (r) => (lectures.get(r.doctor) ?? 0) >= minTotal && (!allOnly || r.values.every((v) => v > 0)),
+    );
+  }, [data, active.join("|"), metric, fee, minTotal, allOnly]);
 
   const two = active.length === 2;
   const lean = two ? leanCounts(rows) : null;
@@ -74,6 +77,10 @@ export function CompanyCompare({ onOpenDoctor }: { onOpenDoctor: (key: string) =
               {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{n}回以上</option>)}
             </select>
             の医師
+          </label>
+          <label className="flex items-center gap-1">
+            <input type="checkbox" checked={allOnly} onChange={(e) => setAllOnly(e.target.checked)} />
+            選んだ会社すべてと関係のある医師だけ
           </label>
         </div>
       </div>
