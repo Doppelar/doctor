@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { availableYears, buildRelations, companyOf, filterByYear, fiscalYearOf, doctorUnitPrices, estimateFee, estimateFeeFor, sumFees, unitPrice } from "./relations";
+import { availableYears, buildRelations, compareCompanies, companyOf, leanCounts, filterByYear, fiscalYearOf, doctorUnitPrices, estimateFee, estimateFeeFor, sumFees, unitPrice } from "./relations";
 import type { Payment } from "./payments";
 
 describe("カテゴリから会社を決める", () => {
@@ -104,5 +104,27 @@ describe("年度", () => {
     expect(r.payments).toHaveLength(1);
     expect(filterByYear(events, pays, null).events).toHaveLength(3);
     expect(availableYears(events, pays)).toEqual([2026, 2025, 2024]);
+  });
+});
+
+describe("メーカー比較（好意度）", () => {
+  const edge = (doctor: string, company: string, lectures: number) =>
+    ({ doctor, company, lectures, asSpeaker: lectures, asModerator: 0, amount: 0, feeAmount: 0, feeCount: 0, lastDate: null });
+  const edges = [
+    edge("a", "J", 3), edge("a", "S", 1),
+    edge("b", "S", 2),
+    edge("c", "J", 1), edge("c", "S", 1), edge("c", "X", 9),
+    edge("d", "X", 5),
+  ];
+
+  it("選んだ会社の合計を100%として割合を出し、1社目寄りから並べる", () => {
+    const rows = compareCompanies(edges, ["J", "S"], (e) => e.lectures);
+    expect(rows.map((r) => r.doctor)).toEqual(["a", "c", "b"]);
+    expect(rows[0]).toMatchObject({ values: [3, 1], total: 4, shares: [0.75, 0.25] });
+    expect(rows.find((r) => r.doctor === "d")).toBeUndefined();
+  });
+
+  it("70%以上を「寄り」として数える", () => {
+    expect(leanCounts(compareCompanies(edges, ["J", "S"], (e) => e.lectures))).toEqual({ first: 1, middle: 1, second: 1 });
   });
 });

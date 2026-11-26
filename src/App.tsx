@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, LogOut, Trash2, Upload } from "lucide-react";
 import { Button, Card, Input, Modal } from "./ui";
 import { CompanyShareChart, RelationMap, RelationMatrix, YearSelect, useRelations } from "./relations-view";
+import { CompanyCompare } from "./compare-view";
 import { FeeRatesBar, FeeRatesProvider, YearProvider, useFeeRates, useYear } from "./fees";
 import { doctorUnitPrices, estimateFeeFor, sumFees, unitPrice } from "./shared/relations";
 import { CSV_COLUMNS, PAYMENT_CATEGORIES, type CalendarAppearance, type DoctorSummary, type Payment } from "./shared/payments";
@@ -33,6 +34,7 @@ const TABS = [
   ["list", "医師一覧"],
   ["map", "関係性マップ"],
   ["share", "メーカーの割合"],
+  ["compare", "メーカー比較"],
   ["matrix", "医師×会社の表"],
 ] as const;
 
@@ -58,6 +60,7 @@ function Main() {
       {tab === "list" && <Doctors onOpen={setOpenKey} />}
       {tab === "map" && <RelationMap onOpenDoctor={setOpenKey} />}
       {tab === "share" && <CompanyShareChart onOpenDoctor={setOpenKey} />}
+      {tab === "compare" && <CompanyCompare onOpenDoctor={setOpenKey} />}
       {tab === "matrix" && <RelationMatrix onOpenDoctor={setOpenKey} />}
       <DoctorDialog doctorKey={openKey} onClose={() => setOpenKey(null)} />
     </div>

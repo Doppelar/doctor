@@ -203,3 +203,40 @@ export function doctorUnitPrices(edges: readonly RelationEdge[]): Map<string, nu
   }
   return out;
 }
+
+export type CompareRow = { doctor: string; values: number[]; total: number; shares: number[] };
+
+/**
+ * 選んだ会社どうしで、医師ごとの割合（好意度）を出す。割合は「選んだ会社の合計」を100%とする。
+ * 2社のときは、1社目の割合が高い順（1社目寄り → 2社目寄り）に並べる。
+ */
+export function compareCompanies(
+  edges: readonly RelationEdge[],
+  companies: readonly string[],
+  valueOf: (e: RelationEdge) => number,
+): CompareRow[] {
+  const byDoctor = new Map<string, number[]>();
+  for (const e of edges) {
+    const i = companies.indexOf(e.company);
+    if (i < 0) continue;
+    const v = byDoctor.get(e.doctor) ?? new Array(companies.length).fill(0);
+    v[i] += valueOf(e);
+    byDoctor.set(e.doctor, v);
+  }
+  const rows = [...byDoctor].map(([doctor, values]) => {
+    const total = values.reduce((a, b) => a + b, 0);
+    return { doctor, values, total, shares: values.map((v) => (total > 0 ? v / total : 0)) };
+  }).filter((r) => r.total > 0);
+  return rows.sort((a, b) => b.shares[0] - a.shares[0] || b.total - a.total);
+}
+
+/** 2社の比較で、1社目寄り・中間・2社目寄りに分ける（しきい値は割合）。 */
+export function leanCounts(rows: readonly CompareRow[], threshold = 0.7) {
+  let first = 0, middle = 0, second = 0;
+  for (const r of rows) {
+    if (r.shares[0] >= threshold) first++;
+    else if (r.shares[1] >= threshold) second++;
+    else middle++;
+  }
+  return { first, middle, second };
+}
