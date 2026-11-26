@@ -69,6 +69,15 @@ export function RelationMap({ onOpenDoctor }: { onOpenDoctor: (key: string) => v
 
   const W = 1000;
   const H = 720;
+  // 会社名は輪の外側に向けて置く
+  const labelOffset = (n: Node, r: number) => {
+    const dx = (n.x ?? 0) - W / 2;
+    const dy = (n.y ?? 0) - H / 2;
+    const len = Math.hypot(dx, dy) || 1;
+    const x = (dx / len) * (r + 8);
+    const y = (dy / len) * (r + 10);
+    return { x, y, anchor: (Math.abs(dx) < 60 ? "middle" : dx > 0 ? "start" : "end") as "middle" | "start" | "end" };
+  };
   const layout = useMemo(() => {
     if (!filtered) return null;
     const nodes: Node[] = [
@@ -76,18 +85,25 @@ export function RelationMap({ onOpenDoctor }: { onOpenDoctor: (key: string) => v
       ...filtered.doctors.map((d) => ({ id: `d:${d.key}`, kind: "doctor" as const, label: d.name, weight: d.lectures })),
     ];
     const links = filtered.edges.map((e) => ({ source: `d:${e.doctor}`, target: `c:${e.company}`, e }));
-    const radius = (n: Node) => (n.kind === "company" ? 10 + Math.sqrt(n.weight) * 2.2 : 3 + Math.sqrt(n.weight) * 1.6);
+    const radius = (n: Node) => (n.kind === "company" ? 8 + Math.sqrt(n.weight) * 1.8 : 3 + Math.sqrt(n.weight) * 1.5);
+    // 会社は外側の輪に固定し、医師はつながりのある会社の方へ引き寄せる
+    const companies = nodes.filter((n) => n.kind === "company");
+    companies.forEach((n, i) => {
+      const a = (i / companies.length) * Math.PI * 2 - Math.PI / 2;
+      n.fx = W / 2 + Math.cos(a) * W * 0.33;
+      n.fy = H / 2 + Math.sin(a) * H * 0.4;
+    });
     const sim = forceSimulation(nodes)
-      .force("link", forceLink<Node, (typeof links)[number]>(links).id((n) => n.id).distance(70).strength(0.6))
-      .force("charge", forceManyBody<Node>().strength((n) => (n.kind === "company" ? -900 : -40)))
-      .force("collide", forceCollide<Node>().radius((n) => radius(n) + 3))
-      .force("x", forceX(W / 2).strength(0.05))
-      .force("y", forceY(H / 2).strength(0.07))
+      .force("link", forceLink<Node, (typeof links)[number]>(links).id((n) => n.id).distance(40).strength((l) => 0.08 + Math.min(l.e.lectures, 6) * 0.05))
+      .force("charge", forceManyBody<Node>().strength(-45))
+      .force("collide", forceCollide<Node>().radius((n) => radius(n) + 5))
+      .force("x", forceX(W / 2).strength(0.02))
+      .force("y", forceY(H / 2).strength(0.02))
       .stop();
-    sim.tick(400);
+    sim.tick(500);
     for (const n of nodes) {
-      n.x = Math.max(30, Math.min(W - 30, n.x ?? 0));
-      n.y = Math.max(20, Math.min(H - 20, n.y ?? 0));
+      n.x = Math.max(150, Math.min(W - 150, n.x ?? 0));
+      n.y = Math.max(40, Math.min(H - 40, n.y ?? 0));
     }
     const pos = new Map(nodes.map((n) => [n.id, n]));
     return { nodes, links: links.map((l) => ({ ...l, a: pos.get(`d:${l.e.doctor}`)!, b: pos.get(`c:${l.e.company}`)! })), radius };
@@ -133,7 +149,12 @@ export function RelationMap({ onOpenDoctor }: { onOpenDoctor: (key: string) => v
                     <title>{`${n.label}：${n.weight}回`}</title>
                     <circle r={r} fill={company ? "#1e293b" : "#0284c7"} stroke="#fff" strokeWidth={company ? 2 : 1} />
                     {(company || labelDoctor(n)) && (
-                      <text y={company ? r + 13 : -r - 4} textAnchor="middle" fontSize={company ? 13 : 11}
+                      <text
+                        x={company ? labelOffset(n, r).x : 0}
+                        y={company ? labelOffset(n, r).y : -r - 4}
+                        textAnchor={company ? labelOffset(n, r).anchor : "middle"}
+                        dominantBaseline={company ? "middle" : undefined}
+                        fontSize={company ? 13 : 11}
                         fontWeight={company ? 700 : 500} fill={company ? "#0f172a" : "#334155"}
                         stroke="#fff" strokeWidth={3} paintOrder="stroke">
                         {n.label}
