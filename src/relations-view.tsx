@@ -294,3 +294,117 @@ export function RelationMatrix({ onOpenDoctor }: { onOpenDoctor: (key: string) =
     </div>
   );
 }
+
+/** 会社の色（参照パレットの分類色、上位7社に固定順で割り当て、残りは「その他」）。 */
+const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6"];
+const OTHER = "#a3a39c";
+
+/** 医師ごとの金額に占める会社の割合（100%積み上げ横棒）。 */
+export function CompanyShareChart({ onOpenDoctor }: { onOpenDoctor: (key: string) => void }) {
+  const { data, isLoading } = useRelations();
+  const fee = useEdgeFee(data);
+  const [minLectures, setMinLectures] = useState(4);
+  const [company, setCompany] = useState("");
+  const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
+  const filtered = useFiltered(data, minLectures, "");
+
+  const valueOf = (e: RelationEdge) => Math.max(fee(e), e.amount);
+  const view = useMemo(() => {
+    if (!filtered) return null;
+    // 色は会社に固定：全体の金額の多い順に上位7社
+    const totals = new Map<string, number>();
+    for (const e of filtered.edges) totals.set(e.company, (totals.get(e.company) ?? 0) + valueOf(e));
+    const ranked = [...totals].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+    const named = ranked.slice(0, SERIES.length);
+    const colorOf = (c: string) => SERIES[named.indexOf(c)] ?? OTHER;
+    const rows = filtered.doctors.map((d) => {
+      const mine = filtered.edges.filter((e) => e.doctor === d.key);
+      const total = mine.reduce((s, e) => s + valueOf(e), 0);
+      const parts = new Map<string, number>();
+      for (const e of mine) {
+        const k = named.includes(e.company) ? e.company : "その他";
+        parts.set(k, (parts.get(k) ?? 0) + valueOf(e));
+      }
+      const segments = [...named, "その他"]
+        .filter((k) => parts.get(k))
+        .map((k) => ({ company: k, value: parts.get(k)!, share: parts.get(k)! / total, color: k === "その他" ? OTHER : colorOf(k) }));
+      const focusShare = company ? (mine.filter((e) => e.company === company).reduce((s, e) => s + valueOf(e), 0) / (total || 1)) : 0;
+      return { d, total, segments, focusShare };
+    }).filter((r) => r.total > 0);
+    rows.sort((a, b) => (company ? b.focusShare - a.focusShare : 0) || b.total - a.total);
+    return { rows: rows.slice(0, 40), named, others: ranked.slice(SERIES.length), colorOf };
+  }, [filtered, fee, company]);
+
+  if (isLoading || !data || !view) return <p className="text-sm text-slate-500">読み込み中…</p>;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <label className="flex items-center gap-2">
+          医師の合計登場回数
+          <select value={minLectures} onChange={(e) => setMinLectures(Number(e.target.value))} className="h-9 rounded-md border border-slate-300 bg-white px-2">
+            {[1, 2, 3, 4, 5, 8].map((n) => <option key={n} value={n}>{n}回以上</option>)}
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          並べ方
+          <select value={company} onChange={(e) => setCompany(e.target.value)} className="h-9 rounded-md border border-slate-300 bg-white px-2">
+            <option value="">金額の多い順</option>
+            {[...view.named, ...view.others].map((c) => <option key={c} value={c}>{c} の割合が高い順</option>)}
+          </select>
+        </label>
+      </div>
+
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-700" aria-label="凡例">
+        {view.named.map((c) => (
+          <span key={c} className="flex items-center gap-1">
+            <span className="inline-block h-3 w-3 rounded-sm" style={{ background: view.colorOf(c) }} />{c}
+          </span>
+        ))}
+        {view.others.length > 0 && (
+          <span className="flex items-center gap-1" title={view.others.join("、")}>
+            <span className="inline-block h-3 w-3 rounded-sm" style={{ background: OTHER }} />その他（{view.others.length}社）
+          </span>
+        )}
+      </div>
+
+      <Card className="relative p-4" >
+        <div className="space-y-1.5" onMouseLeave={() => setHover(null)}>
+          {view.rows.map(({ d, total, segments, focusShare }) => (
+            <div key={d.key} className="grid grid-cols-[6.5rem_1fr_4.5rem] items-center gap-2 text-xs sm:grid-cols-[8rem_1fr_5rem]">
+              <button type="button" className="truncate text-left font-medium text-slate-800 hover:underline" onClick={() => onOpenDoctor(d.key)} title={d.affiliation}>
+                {d.name}
+              </button>
+              <div className="flex h-5 overflow-hidden rounded-[4px] bg-slate-100" role="img" aria-label={`${d.name}：${segments.map((s) => `${s.company} ${Math.round(s.share * 100)}%`).join("、")}`}>
+                {segments.map((s) => (
+                  <div
+                    key={s.company}
+                    className="flex h-full items-center justify-center border-r-2 border-white text-[10px] font-medium text-white last:border-r-0"
+                    style={{ width: `${s.share * 100}%`, background: s.color, opacity: company && s.company !== company ? 0.35 : 1 }}
+                    onMouseMove={(ev) => {
+                      const box = (ev.currentTarget.closest(".relative") as HTMLElement).getBoundingClientRect();
+                      setHover({ x: ev.clientX - box.left, y: ev.clientY - box.top, text: `${d.name} × ${s.company}：${Math.round(s.share * 100)}%（目安 ${yenFull(s.value)}）` });
+                    }}
+                  >
+                    {s.share >= 0.15 && `${Math.round(s.share * 100)}%`}
+                  </div>
+                ))}
+              </div>
+              <span className="text-right tabular-nums text-slate-600">
+                {company ? `${Math.round(focusShare * 100)}%` : `${man(total)}円`}
+              </span>
+            </div>
+          ))}
+        </div>
+        {hover && (
+          <div className="pointer-events-none absolute z-10 rounded-md bg-slate-900/90 px-2 py-1 text-xs text-white shadow" style={{ left: Math.min(hover.x + 12, 600), top: hover.y + 14 }}>
+            {hover.text}
+          </div>
+        )}
+      </Card>
+      <p className="text-xs text-slate-500">
+        各医師の金額（目安：登場回数×単価。支払いを登録した組み合わせは登録額との大きい方）を100%として、会社ごとの割合を示します。上位40人まで。表の数値は「医師×会社の表」タブにあります。
+      </p>
+    </div>
+  );
+}

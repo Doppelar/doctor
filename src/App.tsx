@@ -2,7 +2,7 @@ import { useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, LogOut, Trash2, Upload } from "lucide-react";
 import { Button, Card, Input, Modal } from "./ui";
-import { RelationMap, RelationMatrix, useRelations } from "./relations-view";
+import { CompanyShareChart, RelationMap, RelationMatrix, useRelations } from "./relations-view";
 import { FeeRatesBar, FeeRatesProvider, useFeeRates } from "./fees";
 import { doctorUnitPrices, estimateFeeFor, sumFees, unitPrice } from "./shared/relations";
 import { CSV_COLUMNS, PAYMENT_CATEGORIES, type CalendarAppearance, type DoctorSummary, type Payment } from "./shared/payments";
@@ -32,6 +32,7 @@ export default function App() {
 const TABS = [
   ["list", "医師一覧"],
   ["map", "関係性マップ"],
+  ["share", "メーカーの割合"],
   ["matrix", "医師×会社の表"],
 ] as const;
 
@@ -52,6 +53,7 @@ function Main() {
       </div>
       {tab === "list" && <Doctors onOpen={setOpenKey} />}
       {tab === "map" && <RelationMap onOpenDoctor={setOpenKey} />}
+      {tab === "share" && <CompanyShareChart onOpenDoctor={setOpenKey} />}
       {tab === "matrix" && <RelationMatrix onOpenDoctor={setOpenKey} />}
       <DoctorDialog doctorKey={openKey} onClose={() => setOpenKey(null)} />
     </div>
