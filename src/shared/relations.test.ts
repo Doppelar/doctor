@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRelations, companyOf, estimateFee, sumFees } from "./relations";
+import { buildRelations, companyOf, doctorUnitPrices, estimateFee, estimateFeeFor, sumFees, unitPrice } from "./relations";
 import type { Payment } from "./payments";
 
 describe("カテゴリから会社を決める", () => {
@@ -55,7 +55,7 @@ describe("医師×会社の関係", () => {
 describe("目安金額", () => {
   const rates = { speaker: 100000, moderator: 50000 };
   const edge = (doctor: string, company: string, asSpeaker: number, asModerator: number, amount = 0) =>
-    ({ doctor, company, lectures: asSpeaker + asModerator, asSpeaker, asModerator, amount, lastDate: null });
+    ({ doctor, company, lectures: asSpeaker + asModerator, asSpeaker, asModerator, amount, feeAmount: 0, feeCount: 0, lastDate: null });
 
   it("演者・座長の回数に単価を掛ける", () => {
     expect(estimateFee(edge("a", "X", 2, 1), rates)).toBe(250000);
@@ -66,5 +66,25 @@ describe("目安金額", () => {
     const m = sumFees([edge("a", "X", 1, 0, 30000), edge("a", "Y", 0, 2), edge("b", "X", 1, 1)], rates, (e) => e.doctor);
     expect(m.get("a")).toEqual({ estimate: 200000, registered: 30000 });
     expect(m.get("b")).toEqual({ estimate: 150000, registered: 0 });
+  });
+});
+
+describe("医師ごとの単価", () => {
+  const rates = { speaker: 100000, moderator: 50000 };
+  const pay = (over: Partial<Payment>): Payment => ({
+    id: 1, doctorKey: "松本守生", doctorName: "松本守生", institution: null, company: "A",
+    fiscalYear: 2024, category: "講師謝金", count: 2, amount: 300000, sourceUrl: null, note: null, ...over,
+  });
+
+  it("講師謝金の金額÷件数で単価を出し、件数のない登録や他の区分は使わない", () => {
+    const r = buildRelations([], [pay({}), pay({ company: "B", count: 1, amount: 100000 }), pay({ category: "コンサルティング等業務委託費", count: 1, amount: 999999 }), pay({ count: null, amount: 50000 })]);
+    const units = doctorUnitPrices(r.edges);
+    expect(units.get("松本守生")).toBeCloseTo(400000 / 3);
+    expect(unitPrice([])).toBeNull();
+  });
+
+  it("実績の単価があれば演者はその単価、座長は既定の比率で計算する", () => {
+    expect(estimateFeeFor({ asSpeaker: 2, asModerator: 1 }, rates, 150000)).toBe(300000 + 75000);
+    expect(estimateFeeFor({ asSpeaker: 2, asModerator: 1 }, rates, null)).toBe(250000);
   });
 });

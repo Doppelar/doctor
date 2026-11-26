@@ -52,6 +52,8 @@ export type RelationEdge = {
   asSpeaker: number;
   asModerator: number;
   amount: number; // 登録した支払いの合計（円）
+  feeAmount: number; // うち講師謝金の金額（件数のわかるもの）
+  feeCount: number; // その件数
   lastDate: string | null;
 };
 
@@ -71,7 +73,7 @@ export function buildRelations(events: readonly EventLike[], payments: readonly 
   const edge = (doctor: string, company: string) => {
     const k = `${doctor}\u0000${company}`;
     let e = edges.get(k);
-    if (!e) edges.set(k, (e = { doctor, company, lectures: 0, asSpeaker: 0, asModerator: 0, amount: 0, lastDate: null }));
+    if (!e) edges.set(k, (e = { doctor, company, lectures: 0, asSpeaker: 0, asModerator: 0, amount: 0, feeAmount: 0, feeCount: 0, lastDate: null }));
     return e;
   };
 
@@ -96,7 +98,12 @@ export function buildRelations(events: readonly EventLike[], payments: readonly 
     }
   }
   for (const p of payments) {
-    edge(p.doctorKey, p.company).amount += p.amount;
+    const e = edge(p.doctorKey, p.company);
+    e.amount += p.amount;
+    if (p.category === "講師謝金" && p.count && p.count > 0) {
+      e.feeAmount += p.amount;
+      e.feeCount += p.count;
+    }
     if (!info.has(p.doctorKey)) info.set(p.doctorKey, { name: p.doctorName, affiliation: p.institution ?? "" });
   }
 
@@ -136,14 +143,42 @@ export function estimateFee(e: Pick<RelationEdge, "asSpeaker" | "asModerator">, 
 }
 
 /** 医師ごと（または会社ごと）に、目安金額と登録済みの支払いを合計する。 */
-export function sumFees(edges: readonly RelationEdge[], rates: FeeRates, keyOf: (e: RelationEdge) => string) {
+export function sumFees(edges: readonly RelationEdge[], rates: FeeRates, keyOf: (e: RelationEdge) => string, units: Map<string, number> = new Map()) {
   const out = new Map<string, { estimate: number; registered: number }>();
   for (const e of edges) {
     const k = keyOf(e);
     const v = out.get(k) ?? { estimate: 0, registered: 0 };
-    v.estimate += estimateFee(e, rates);
+    v.estimate += estimateFeeFor(e, rates, units.get(e.doctor) ?? null);
     v.registered += e.amount;
     out.set(k, v);
+  }
+  return out;
+}
+
+/** 講師謝金の実績から出す1回あたりの単価（件数のわかる登録がなければ null）。 */
+export function unitPrice(edges: readonly Pick<RelationEdge, "feeAmount" | "feeCount">[]): number | null {
+  const count = edges.reduce((s, e) => s + e.feeCount, 0);
+  return count > 0 ? edges.reduce((s, e) => s + e.feeAmount, 0) / count : null;
+}
+
+/**
+ * 医師ごとの単価を使った目安金額。実績の単価があれば演者1回をその単価、座長は既定の比率（座長÷演者）で計算する。
+ * 実績がなければ既定の単価を使う。
+ */
+export function estimateFeeFor(e: Pick<RelationEdge, "asSpeaker" | "asModerator">, rates: FeeRates, doctorUnit: number | null): number {
+  if (doctorUnit == null) return estimateFee(e, rates);
+  const ratio = rates.speaker > 0 ? rates.moderator / rates.speaker : 0.5;
+  return e.asSpeaker * doctorUnit + e.asModerator * doctorUnit * ratio;
+}
+
+/** 医師ごとの実績単価（講師謝金の金額÷件数）。 */
+export function doctorUnitPrices(edges: readonly RelationEdge[]): Map<string, number> {
+  const byDoctor = new Map<string, RelationEdge[]>();
+  for (const e of edges) byDoctor.set(e.doctor, [...(byDoctor.get(e.doctor) ?? []), e]);
+  const out = new Map<string, number>();
+  for (const [doctor, list] of byDoctor) {
+    const u = unitPrice(list);
+    if (u != null) out.set(doctor, u);
   }
   return out;
 }

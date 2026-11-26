@@ -4,7 +4,7 @@ import { Lock, LogOut, Trash2, Upload } from "lucide-react";
 import { Button, Card, Input, Modal } from "./ui";
 import { RelationMap, RelationMatrix, useRelations } from "./relations-view";
 import { FeeRatesBar, FeeRatesProvider, useFeeRates } from "./fees";
-import { estimateFee, sumFees } from "./shared/relations";
+import { doctorUnitPrices, estimateFeeFor, sumFees, unitPrice } from "./shared/relations";
 import { CSV_COLUMNS, PAYMENT_CATEGORIES, type CalendarAppearance, type DoctorSummary, type Payment } from "./shared/payments";
 
 type DoctorDetail = { key: string; name: string; payments: Payment[]; appearances: CalendarAppearance[] };
@@ -114,7 +114,8 @@ function Doctors({ onOpen }: { onOpen: (key: string) => void }) {
   const { data = [], isLoading } = useQuery({ queryKey: ["doctors"], queryFn: () => api<DoctorSummary[]>("/api/doctors") });
   const rates = useFeeRates();
   const relations = useRelations();
-  const fees = useMemo(() => sumFees(relations.data?.edges ?? [], rates, (e) => e.doctor), [relations.data, rates]);
+  const units = useMemo(() => doctorUnitPrices(relations.data?.edges ?? []), [relations.data]);
+  const fees = useMemo(() => sumFees(relations.data?.edges ?? [], rates, (e) => e.doctor, units), [relations.data, rates, units]);
   const estimateOf = (key: string) => fees.get(key)?.estimate ?? 0;
 
   const years = useMemo(() => [...new Set(data.flatMap((d) => Object.keys(d.byYear)))].sort().reverse().slice(0, 3), [data]);
@@ -146,18 +147,20 @@ function Doctors({ onOpen }: { onOpen: (key: string) => void }) {
               <th className="px-4 py-2">所属（カレンダーより）</th>
               <th className="px-4 py-2 text-right">講演・座長</th>
               {years.map((y) => <th key={y} className="px-4 py-2 text-right">{y}年度</th>)}
+              <th className="px-4 py-2 text-right" title="講師謝金の登録から出した1回あたりの金額">単価（実績）</th>
               <th className="px-4 py-2 text-right">目安金額</th>
               <th className="px-4 py-2 text-right">登録合計</th>
             </tr>
           </thead>
           <tbody>
-            {isLoading && <tr><td className="px-4 py-6 text-slate-500" colSpan={5 + years.length}>読み込み中…</td></tr>}
+            {isLoading && <tr><td className="px-4 py-6 text-slate-500" colSpan={6 + years.length}>読み込み中…</td></tr>}
             {rows.map((d) => (
               <tr key={d.key} className="cursor-pointer border-t border-slate-100 hover:bg-sky-50" onClick={() => onOpen(d.key)}>
                 <td className="whitespace-nowrap px-4 py-2 font-medium">{d.name}</td>
                 <td className="max-w-xs truncate px-4 py-2 text-slate-600" title={d.affiliation}>{d.affiliation}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{d.lectureCount || "—"}</td>
                 {years.map((y) => <td key={y} className="px-4 py-2 text-right tabular-nums">{d.byYear[y] ? yen(d.byYear[y]) : "—"}</td>)}
+                <td className="px-4 py-2 text-right tabular-nums">{units.has(d.key) ? yen(Math.round(units.get(d.key)!)) : "—"}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{estimateOf(d.key) ? yen(estimateOf(d.key)) : "—"}</td>
                 <td className="px-4 py-2 text-right font-medium tabular-nums">{d.total ? yen(d.total) : "—"}</td>
               </tr>
@@ -187,7 +190,10 @@ function DoctorDialog({ doctorKey, onClose }: { doctorKey: string | null; onClos
   const total = data?.payments.reduce((s, p) => s + p.amount, 0) ?? 0;
   const relations = useRelations(Boolean(doctorKey));
   const rates = useFeeRates();
-  const byCompany = (relations.data?.edges ?? []).filter((e) => e.doctor === doctorKey).sort((a, b) => b.lectures - a.lectures || b.amount - a.amount);
+  const mine = (relations.data?.edges ?? []).filter((e) => e.doctor === doctorKey);
+  const unit = unitPrice(mine);
+  const feeCount = mine.reduce((s, e) => s + e.feeCount, 0);
+  const byCompany = mine.sort((a, b) => b.lectures - a.lectures || b.amount - a.amount);
 
   return (
     <Modal open={Boolean(doctorKey)} onClose={onClose} title={data?.name ?? doctorKey} wide>
@@ -195,6 +201,15 @@ function DoctorDialog({ doctorKey, onClose }: { doctorKey: string | null; onClos
         <div className="space-y-6">
           <section className="space-y-2">
             <h3 className="text-sm font-semibold text-slate-700">製薬会社との関係（{byCompany.length}社）</h3>
+            <p className="rounded-md bg-slate-50 px-3 py-2 text-sm">
+              講師謝金の単価（実績）：
+              {unit != null ? (
+                <b className="tabular-nums">{yen(Math.round(unit))}／回</b>
+              ) : (
+                <span className="text-slate-500">未登録（目安金額は仮の単価 演者{yen(rates.speaker)}・座長{yen(rates.moderator)} で計算）</span>
+              )}
+              {unit != null && <span className="text-xs text-slate-500">（講師謝金 {feeCount}件の平均。座長は既定の比率で計算）</span>}
+            </p>
             {byCompany.length === 0 ? (
               <p className="text-sm text-slate-500">{relations.isLoading ? "読み込み中…" : "会社の講演会への登場や支払いの登録はありません。"}</p>
             ) : (
@@ -203,7 +218,7 @@ function DoctorDialog({ doctorKey, onClose }: { doctorKey: string | null; onClos
                   <li key={e.company} className="flex flex-wrap justify-between gap-x-3">
                     <span className="font-medium">{e.company}</span>
                     <span className="tabular-nums text-slate-600">
-                      講演会 {e.lectures}回（演者 {e.asSpeaker}・座長 {e.asModerator}）・目安 {yen(estimateFee(e, rates))}{e.lastDate && `・最新 ${e.lastDate}`}{e.amount ? `・登録 ${yen(e.amount)}` : ""}
+                      講演会 {e.lectures}回（演者 {e.asSpeaker}・座長 {e.asModerator}）・目安 {yen(Math.round(estimateFeeFor(e, rates, unit)))}{e.feeCount > 0 && `・単価 ${yen(Math.round(e.feeAmount / e.feeCount))}/回（${e.feeCount}件）`}{e.lastDate && `・最新 ${e.lastDate}`}{e.amount ? `・登録 ${yen(e.amount)}` : ""}
                     </span>
                   </li>
                 ))}
