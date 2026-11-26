@@ -2,10 +2,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type SimulationNodeDatum } from "d3-force";
-import type { Relations, RelationEdge } from "./shared/relations";
+import { estimateFee, type Relations, type RelationEdge } from "./shared/relations";
+import { man, useFeeRates, yen as yenFull } from "./fees";
 import { Button, Card } from "./ui";
 
-const yen = (n: number) => `${n.toLocaleString("ja-JP")}円`;
 
 export function useRelations(enabled = true) {
   return useQuery({
@@ -65,6 +65,7 @@ export function RelationMap({ onOpenDoctor }: { onOpenDoctor: (key: string) => v
   const [minLectures, setMinLectures] = useState(4);
   const [company, setCompany] = useState("");
   const [focus, setFocus] = useState<string | null>(null);
+  const rates = useFeeRates();
   const filtered = useFiltered(data, minLectures, company);
 
   const W = 1000;
@@ -176,7 +177,7 @@ export function RelationMap({ onOpenDoctor }: { onOpenDoctor: (key: string) => v
                 {filtered.companies.map((c) => (
                   <li key={c.name} className="flex justify-between gap-2">
                     <button type="button" className="truncate text-left text-sky-700 hover:underline" onClick={() => setFocus(`c:${c.name}`)}>{c.name}</button>
-                    <span className="shrink-0 tabular-nums text-slate-500">{filtered.edges.filter((e) => e.company === c.name).reduce((s, e) => s + e.lectures, 0)}回・{filtered.edges.filter((e) => e.company === c.name).length}人</span>
+                    <span className="shrink-0 tabular-nums text-slate-500">{filtered.edges.filter((e) => e.company === c.name).reduce((s, e) => s + e.lectures, 0)}回・{filtered.edges.filter((e) => e.company === c.name).length}人・目安{man(filtered.edges.filter((e) => e.company === c.name).reduce((s, e) => s + estimateFee(e, rates), 0))}円</span>
                   </li>
                 ))}
               </ul>
@@ -189,11 +190,15 @@ export function RelationMap({ onOpenDoctor }: { onOpenDoctor: (key: string) => v
 }
 
 function FocusPanel({ node, edges, onOpenDoctor }: { node: Node; edges: RelationEdge[]; onOpenDoctor: (key: string) => void }) {
+  const rates = useFeeRates();
+  const total = edges.reduce((s, e) => s + estimateFee(e, rates), 0);
+  const registered = edges.reduce((s, e) => s + e.amount, 0);
   const isDoctor = node.kind === "doctor";
   const rows = [...edges].sort((a, b) => b.lectures - a.lectures || b.amount - a.amount);
   return (
     <div className="space-y-2">
       <h3 className="font-semibold">{node.label}</h3>
+      <p className="text-xs text-slate-600">目安金額 合計 <b className="text-slate-900">{yenFull(total)}</b>{registered > 0 && <>・登録額 <b className="text-slate-900">{yenFull(registered)}</b></>}</p>
       {isDoctor && (
         <Button variant="outline" size="sm" onClick={() => onOpenDoctor(node.id.slice(2))}>詳しく見る</Button>
       )}
@@ -206,7 +211,7 @@ function FocusPanel({ node, edges, onOpenDoctor }: { node: Node; edges: Relation
               <button type="button" className="truncate text-left text-sky-700 hover:underline" onClick={() => onOpenDoctor(e.doctor)}>{e.doctor}</button>
             )}
             <span className="shrink-0 tabular-nums text-slate-500">
-              {e.lectures}回{e.amount ? `・${yen(e.amount)}` : ""}
+              {e.lectures}回・目安{man(estimateFee(e, rates))}円{e.amount ? `・登録${man(e.amount)}円` : ""}
             </span>
           </li>
         ))}
@@ -218,16 +223,28 @@ function FocusPanel({ node, edges, onOpenDoctor }: { node: Node; edges: Relation
 /** 医師×会社の表。セルは登場回数（色が濃いほど多い）。 */
 export function RelationMatrix({ onOpenDoctor }: { onOpenDoctor: (key: string) => void }) {
   const { data, isLoading } = useRelations();
+  const rates = useFeeRates();
+  const [show, setShow] = useState<"count" | "amount">("amount");
   const [minLectures, setMinLectures] = useState(3);
   const [company, setCompany] = useState("");
   const filtered = useFiltered(data, minLectures, company);
   if (isLoading || !data || !filtered) return <p className="text-sm text-slate-500">読み込み中…</p>;
 
   const cell = new Map(filtered.edges.map((e) => [`${e.doctor}\u0000${e.company}`, e]));
-  const max = Math.max(...filtered.edges.map((e) => e.lectures), 1);
+  const valueOf = (e: RelationEdge) => (show === "count" ? e.lectures : Math.max(estimateFee(e, rates), e.amount));
+  const max = Math.max(...filtered.edges.map(valueOf), 1);
+  const rowTotal = (key: string) => filtered.edges.filter((e) => e.doctor === key).reduce((s, e) => s + valueOf(e), 0);
+  const rows = [...filtered.doctors].sort((a, b) => rowTotal(b.key) - rowTotal(a.key));
   return (
     <div className="space-y-3">
-      <Controls data={data} minLectures={minLectures} setMinLectures={setMinLectures} company={company} setCompany={setCompany} />
+      <div className="flex flex-wrap items-center gap-3">
+        <Controls data={data} minLectures={minLectures} setMinLectures={setMinLectures} company={company} setCompany={setCompany} />
+        <div className="flex gap-1 rounded-md bg-slate-200/70 p-1 text-sm" role="tablist">
+          {([["amount", "金額（目安）"], ["count", "回数"]] as const).map(([v, l]) => (
+            <Button key={v} variant="ghost" size="sm" role="tab" aria-selected={show === v} className={show === v ? "bg-white shadow-sm hover:bg-white" : ""} onClick={() => setShow(v)}>{l}</Button>
+          ))}
+        </div>
+      </div>
       <Card className="overflow-auto">
         <table className="text-xs">
           <thead className="sticky top-0 bg-white">
@@ -242,20 +259,20 @@ export function RelationMatrix({ onOpenDoctor }: { onOpenDoctor: (key: string) =
             </tr>
           </thead>
           <tbody>
-            {filtered.doctors.map((d) => (
+            {rows.map((d) => (
               <tr key={d.key} className="border-t border-slate-100">
                 <td className="sticky left-0 bg-white px-3 py-1">
                   <button type="button" className="whitespace-nowrap text-left font-medium text-sky-800 hover:underline" onClick={() => onOpenDoctor(d.key)}>{d.name}</button>
                 </td>
-                <td className="px-2 py-1 text-right tabular-nums">{d.lectures}</td>
+                <td className="whitespace-nowrap px-2 py-1 text-right tabular-nums">{show === "count" ? d.lectures : man(rowTotal(d.key))}</td>
                 {filtered.companies.map((c) => {
                   const e = cell.get(`${d.key}\u0000${c.name}`);
                   return (
-                    <td key={c.name} className="h-7 w-9 p-0.5 text-center tabular-nums" title={e ? `${d.name} × ${c.name}：${e.lectures}回${e.amount ? `・${yen(e.amount)}` : ""}` : undefined}>
+                    <td key={c.name} className="h-7 min-w-9 p-0.5 text-center tabular-nums" title={e ? `${d.name} × ${c.name}：${e.lectures}回（演者${e.asSpeaker}・座長${e.asModerator}）・目安${yenFull(estimateFee(e, rates))}${e.amount ? `・登録${yenFull(e.amount)}` : ""}` : undefined}>
                       {e && (
                         <span className="flex h-full items-center justify-center rounded"
-                          style={{ background: `rgba(2,132,199,${0.12 + 0.75 * (e.lectures / max)})`, color: e.lectures / max > 0.5 ? "#fff" : "#0c4a6e" }}>
-                          {e.lectures}{e.amount ? "¥" : ""}
+                          style={{ background: `rgba(2,132,199,${0.12 + 0.75 * (valueOf(e) / max)})`, color: valueOf(e) / max > 0.5 ? "#fff" : "#0c4a6e" }}>
+                          <span className="px-0.5">{show === "count" ? e.lectures : man(valueOf(e))}{e.amount ? "¥" : ""}</span>
                         </span>
                       )}
                     </td>
@@ -266,7 +283,7 @@ export function RelationMatrix({ onOpenDoctor }: { onOpenDoctor: (key: string) =
           </tbody>
         </table>
       </Card>
-      <p className="text-xs text-slate-500">数字は、その会社の講演会に演者・座長として登場した回数。「¥」は支払いの登録があることを示します（金額はセルにマウスを重ねると出ます）。</p>
+      <p className="text-xs text-slate-500">回数は、その会社の講演会に演者・座長として登場した回数。金額は目安（回数×単価、万円）で、支払いを登録した組み合わせは目安と登録額の大きい方を出し「¥」を付けます。セルにマウスを重ねると内訳が出ます。</p>
     </div>
   );
 }

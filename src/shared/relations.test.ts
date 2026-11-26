@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRelations, companyOf } from "./relations";
+import { buildRelations, companyOf, estimateFee, sumFees } from "./relations";
 import type { Payment } from "./payments";
 
 describe("カテゴリから会社を決める", () => {
@@ -49,5 +49,22 @@ describe("医師×会社の関係", () => {
     expect(r.edges.find((x) => x.company === "サノフィ")).toMatchObject({ lectures: 1, amount: 100000 });
     expect(r.doctors[0]).toMatchObject({ key: "松本守生", lectures: 3, amount: 100000, companies: 2 });
     expect(r.companies.find((c) => c.name === "ヤンセンファーマ（J&J）")).toMatchObject({ lectures: 3, doctors: 2 });
+  });
+});
+
+describe("目安金額", () => {
+  const rates = { speaker: 100000, moderator: 50000 };
+  const edge = (doctor: string, company: string, asSpeaker: number, asModerator: number, amount = 0) =>
+    ({ doctor, company, lectures: asSpeaker + asModerator, asSpeaker, asModerator, amount, lastDate: null });
+
+  it("演者・座長の回数に単価を掛ける", () => {
+    expect(estimateFee(edge("a", "X", 2, 1), rates)).toBe(250000);
+    expect(estimateFee(edge("a", "X", 0, 0), rates)).toBe(0);
+  });
+
+  it("医師ごとに目安金額と登録済みの支払いを合計する", () => {
+    const m = sumFees([edge("a", "X", 1, 0, 30000), edge("a", "Y", 0, 2), edge("b", "X", 1, 1)], rates, (e) => e.doctor);
+    expect(m.get("a")).toEqual({ estimate: 200000, registered: 30000 });
+    expect(m.get("b")).toEqual({ estimate: 150000, registered: 0 });
   });
 });

@@ -126,3 +126,24 @@ export function buildRelations(events: readonly EventLike[], payments: readonly 
     edges: list,
   };
 }
+
+/** 目安金額の単価（1回あたり、円）。 */
+export type FeeRates = { speaker: number; moderator: number };
+
+/** 登場回数 × 単価の目安金額。 */
+export function estimateFee(e: Pick<RelationEdge, "asSpeaker" | "asModerator">, rates: FeeRates): number {
+  return e.asSpeaker * rates.speaker + e.asModerator * rates.moderator;
+}
+
+/** 医師ごと（または会社ごと）に、目安金額と登録済みの支払いを合計する。 */
+export function sumFees(edges: readonly RelationEdge[], rates: FeeRates, keyOf: (e: RelationEdge) => string) {
+  const out = new Map<string, { estimate: number; registered: number }>();
+  for (const e of edges) {
+    const k = keyOf(e);
+    const v = out.get(k) ?? { estimate: 0, registered: 0 };
+    v.estimate += estimateFee(e, rates);
+    v.registered += e.amount;
+    out.set(k, v);
+  }
+  return out;
+}

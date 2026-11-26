@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, LogOut, Trash2, Upload } from "lucide-react";
 import { Button, Card, Input, Modal } from "./ui";
 import { RelationMap, RelationMatrix, useRelations } from "./relations-view";
+import { FeeRatesBar, FeeRatesProvider, useFeeRates } from "./fees";
+import { estimateFee, sumFees } from "./shared/relations";
 import { CSV_COLUMNS, PAYMENT_CATEGORIES, type CalendarAppearance, type DoctorSummary, type Payment } from "./shared/payments";
 
 type DoctorDetail = { key: string; name: string; payments: Payment[]; appearances: CalendarAppearance[] };
@@ -24,7 +26,7 @@ export default function App() {
   });
   if (session.isLoading) return <Shell><p className="text-sm text-slate-500">読み込み中…</p></Shell>;
   if (!session.data?.authed) return <Shell><Login configured={session.data?.configured ?? false} /></Shell>;
-  return <Shell authed><Main /></Shell>;
+  return <Shell authed><FeeRatesProvider><Main /></FeeRatesProvider></Shell>;
 }
 
 const TABS = [
@@ -38,6 +40,7 @@ function Main() {
   const [openKey, setOpenKey] = useState<string | null>(null);
   return (
     <div className="space-y-4">
+      <FeeRatesBar />
       <div className="flex gap-1 rounded-lg bg-slate-200/70 p-1" role="tablist">
         {TABS.map(([value, label]) => (
           <Button key={value} role="tab" aria-selected={tab === value} variant="ghost" size="sm"
@@ -109,14 +112,18 @@ function Doctors({ onOpen }: { onOpen: (key: string) => void }) {
   const [onlyPaid, setOnlyPaid] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const { data = [], isLoading } = useQuery({ queryKey: ["doctors"], queryFn: () => api<DoctorSummary[]>("/api/doctors") });
+  const rates = useFeeRates();
+  const relations = useRelations();
+  const fees = useMemo(() => sumFees(relations.data?.edges ?? [], rates, (e) => e.doctor), [relations.data, rates]);
+  const estimateOf = (key: string) => fees.get(key)?.estimate ?? 0;
 
   const years = useMemo(() => [...new Set(data.flatMap((d) => Object.keys(d.byYear)))].sort().reverse().slice(0, 3), [data]);
   const rows = useMemo(() => {
     const q = query.replace(/\s/g, "");
     return data
       .filter((d) => (!onlyPaid || d.total > 0) && (!q || d.name.includes(q) || d.affiliation.includes(q) || d.companies.some((c) => c.includes(q))))
-      .sort((a, b) => b.total - a.total || b.lectureCount - a.lectureCount);
-  }, [data, query, onlyPaid]);
+      .sort((a, b) => Math.max(b.total, estimateOf(b.key)) - Math.max(a.total, estimateOf(a.key)) || b.lectureCount - a.lectureCount);
+  }, [data, query, onlyPaid, fees]);
   const paidCount = data.filter((d) => d.total > 0).length;
 
   return (
@@ -139,17 +146,19 @@ function Doctors({ onOpen }: { onOpen: (key: string) => void }) {
               <th className="px-4 py-2">所属（カレンダーより）</th>
               <th className="px-4 py-2 text-right">講演・座長</th>
               {years.map((y) => <th key={y} className="px-4 py-2 text-right">{y}年度</th>)}
+              <th className="px-4 py-2 text-right">目安金額</th>
               <th className="px-4 py-2 text-right">登録合計</th>
             </tr>
           </thead>
           <tbody>
-            {isLoading && <tr><td className="px-4 py-6 text-slate-500" colSpan={4 + years.length}>読み込み中…</td></tr>}
+            {isLoading && <tr><td className="px-4 py-6 text-slate-500" colSpan={5 + years.length}>読み込み中…</td></tr>}
             {rows.map((d) => (
               <tr key={d.key} className="cursor-pointer border-t border-slate-100 hover:bg-sky-50" onClick={() => onOpen(d.key)}>
                 <td className="whitespace-nowrap px-4 py-2 font-medium">{d.name}</td>
                 <td className="max-w-xs truncate px-4 py-2 text-slate-600" title={d.affiliation}>{d.affiliation}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{d.lectureCount || "—"}</td>
                 {years.map((y) => <td key={y} className="px-4 py-2 text-right tabular-nums">{d.byYear[y] ? yen(d.byYear[y]) : "—"}</td>)}
+                <td className="px-4 py-2 text-right tabular-nums">{estimateOf(d.key) ? yen(estimateOf(d.key)) : "—"}</td>
                 <td className="px-4 py-2 text-right font-medium tabular-nums">{d.total ? yen(d.total) : "—"}</td>
               </tr>
             ))}
@@ -177,6 +186,7 @@ function DoctorDialog({ doctorKey, onClose }: { doctorKey: string | null; onClos
   const remove = useMutation({ mutationFn: (id: number) => api(`/api/payments/${id}`, { method: "DELETE" }), onSuccess: refresh });
   const total = data?.payments.reduce((s, p) => s + p.amount, 0) ?? 0;
   const relations = useRelations(Boolean(doctorKey));
+  const rates = useFeeRates();
   const byCompany = (relations.data?.edges ?? []).filter((e) => e.doctor === doctorKey).sort((a, b) => b.lectures - a.lectures || b.amount - a.amount);
 
   return (
@@ -193,7 +203,7 @@ function DoctorDialog({ doctorKey, onClose }: { doctorKey: string | null; onClos
                   <li key={e.company} className="flex flex-wrap justify-between gap-x-3">
                     <span className="font-medium">{e.company}</span>
                     <span className="tabular-nums text-slate-600">
-                      講演会 {e.lectures}回（演者 {e.asSpeaker}・座長 {e.asModerator}）{e.lastDate && `・最新 ${e.lastDate}`}{e.amount ? `・支払い ${yen(e.amount)}` : ""}
+                      講演会 {e.lectures}回（演者 {e.asSpeaker}・座長 {e.asModerator}）・目安 {yen(estimateFee(e, rates))}{e.lastDate && `・最新 ${e.lastDate}`}{e.amount ? `・登録 ${yen(e.amount)}` : ""}
                     </span>
                   </li>
                 ))}
